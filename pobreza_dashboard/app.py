@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from scraping_ipe import descargar_datos_pobreza_peru
-from utils import *
+from utils import match_columns, validate_dataframe, peru_total, fmt_int
 
 st.set_page_config(
     page_title="📊 Plataforma ciudadana de pobreza (Perú)",
@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- CSS global elegante ---
+# --- Estilos ---
 st.markdown("""
 <style>
 :root { --text: #0F172A; --muted:#475569; --brand:#0EA5E9; }
@@ -27,13 +27,13 @@ hr { border: none; border-top: 1px solid #E2E8F0; margin: .6rem 0; }
 with st.sidebar:
     st.title("📊 Plataforma ciudadana")
     st.markdown("""
-    Combina **datos públicos** (Banco Mundial, IPE, ENAHO–INEI)
-    para analizar la evolución de la pobreza y comparar propuestas.
+    Fuente de datos combinada del **Banco Mundial**, **IPE** y **ENAHO–INEI**  
+    para analizar la evolución de la pobreza y realizar comparaciones regionales.
     """)
     modo = st.radio("Selecciona fuente de datos:", ["Automático (Banco Mundial)", "Manual (Excel ENAHO–INEI)"])
     st.markdown("---")
 
-# --- Tabs principales ---
+# --- Tabs ---
 PRESENTACION, DASHBOARD, COMPARADOR = st.tabs([
     "Presentación general",
     "Dashboard de pobreza",
@@ -46,13 +46,8 @@ PRESENTACION, DASHBOARD, COMPARADOR = st.tabs([
 with PRESENTACION:
     st.header("📈 Plataforma ciudadana de datos sobre pobreza en el Perú")
     st.markdown("""
-    Esta herramienta permite **explorar datos oficiales** sobre pobreza,
-    contrastar regiones y visualizar metas comparativas.
-    
-    - **Modo Automático:** obtiene datos del **Banco Mundial (SI.POV.DDAY)**.
-    - **Modo Manual:** permite cargar paneles *ENAHO–INEI (2019–2023)* desde Excel.
-    
-    Los resultados se presentan en dashboards interactivos con indicadores clave.
+    Esta herramienta combina **fuentes oficiales y abiertas** para ofrecer un panorama actualizado sobre la pobreza.  
+    Permite explorar indicadores por región, año y nivel de vulnerabilidad.
     """)
 
 # -----------------------------------------------------------
@@ -68,16 +63,14 @@ with DASHBOARD:
 
                 fig = px.line(df, x="Año", y="Pobreza (%)", title="Evolución de la pobreza – Perú (Banco Mundial)")
                 st.plotly_chart(fig, use_container_width=True)
-
                 st.dataframe(df, use_container_width=True)
-                st.caption("*Fuente:* Banco Mundial – Indicador SI.POV.DDAY (pobreza nacional).")
-
+                st.caption("*Fuente:* Banco Mundial – Indicador SI.POV.DDAY")
             except Exception as e:
-                st.error("No se pudo descargar los datos del Banco Mundial.")
+                st.error("Error al descargar los datos del Banco Mundial.")
                 st.exception(e)
+
     else:
         st.subheader("Dashboard de pobreza (ENAHO–INEI)")
-
         uploaded = st.file_uploader("Sube tu Excel (XLSX)", type=["xlsx","xls"])
         if not uploaded:
             st.info("Sube un archivo con las columnas: region, year, nvpov, vpov, pov, epov")
@@ -87,11 +80,13 @@ with DASHBOARD:
                 df = match_columns(raw)
                 ok, msgs = validate_dataframe(df)
                 if not ok:
-                    st.error("No se pudo validar el archivo. Revisa los mensajes.")
-                    for m in msgs: st.write("•", m)
+                    st.error("Archivo inválido.")
+                    for m in msgs:
+                        st.write("•", m)
                 else:
                     if msgs:
-                        for m in msgs: st.warning(m)
+                        for m in msgs:
+                            st.warning(m)
 
                     total_pe = peru_total(df)
                     df_all = pd.concat([total_pe, df.copy()], ignore_index=True)
@@ -100,8 +95,7 @@ with DASHBOARD:
                     c1, c2 = st.columns([2,1])
                     region_sel = c1.selectbox("Ámbito", regiones)
                     years = sorted(df['year'].dropna().unique())
-                    y_min, y_max = min(years), max(years)
-                    rango = c2.slider("Años", int(y_min), int(y_max), (int(y_min), int(y_max)))
+                    rango = c2.slider("Años", int(min(years)), int(max(years)), (int(min(years)), int(max(years))))
 
                     view = total_pe if region_sel == "Perú (suma nacional)" else df[df['region']==region_sel]
                     view = view[(view['year']>=rango[0]) & (view['year']<=rango[1])].sort_values('year')
@@ -121,25 +115,24 @@ with DASHBOARD:
                     long = view.melt(id_vars=["year"], value_vars=["nvpov","vpov","pov","epov"],
                                      var_name="variable", value_name="personas")
                     fig = px.line(long, x="year", y="personas", color="variable", markers=True,
-                                  title=f"{region_sel}: series de pobreza")
+                                  title=f"{region_sel}: evolución de pobreza")
                     st.plotly_chart(fig, use_container_width=True)
-
                     st.caption("*Fuente*: ENAHO – INEI")
             except Exception as e:
                 st.error("Error al procesar el archivo.")
                 st.exception(e)
 
 # -----------------------------------------------------------
-# TAB 3: Comparador de propuestas (idéntico a tu prototipo)
+# TAB 3: Comparador de propuestas
 # -----------------------------------------------------------
 with COMPARADOR:
     st.subheader("Comparador de propuestas (ficticias)")
     st.markdown("""
-    - **Candidata A – Mariana Quispe (Andes Unido):** meta epov = 0.  
-    - **Candidato B – Ricardo Navarro (Perú Futuro):** reducir pov a la mitad.
+    **Candidata A – Mariana Quispe (Andes Unido):** meta epov = 0.  
+    **Candidato B – Ricardo Navarro (Perú Futuro):** reducir pov a la mitad.
     """)
 
-    uploaded = st.file_uploader("Sube nuevamente tu Excel para comparación", type=["xlsx","xls"], key="cmp_uploader")
+    uploaded = st.file_uploader("Sube nuevamente tu Excel", type=["xlsx","xls"], key="cmp_uploader")
     if uploaded:
         df2 = pd.read_excel(uploaded)
         df2 = match_columns(df2)
@@ -148,11 +141,9 @@ with COMPARADOR:
             total_pe2 = peru_total(df2)
             regiones2 = ["Perú (suma nacional)"] + sorted(df2['region'].unique().tolist())
             region_sel2 = st.selectbox("Ámbito", regiones2, key="cmp_region")
-
             base_view = total_pe2 if region_sel2 == "Perú (suma nacional)" else df2[df2['region']==region_sel2]
             last_year = int(base_view['year'].max())
             base_row = base_view[base_view['year']==last_year].iloc[0]
-
             target_epov = 0
             target_pov = base_row['pov'] * 0.5
 
@@ -161,8 +152,7 @@ with COMPARADOR:
                 st.markdown("### Candidata A – epov = 0")
                 figA = px.bar(x=["Actual","Meta"], y=[base_row['epov'], target_epov])
                 st.plotly_chart(figA, use_container_width=True)
-                st.info(f"Brecha: {fmt_int(base_row['epov'])} personas a eliminar de pobreza extrema.")
-
+                st.info(f"Brecha: {fmt_int(base_row['epov'])} personas por eliminar pobreza extrema.")
             with cB:
                 st.markdown("### Candidato B – reducir pov 50%")
                 figB = px.bar(x=["Actual","Meta"], y=[base_row['pov'], target_pov])
